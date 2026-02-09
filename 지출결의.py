@@ -6,7 +6,7 @@ import streamlit.components.v1 as components
 import base64
 from io import BytesIO
 
-# --- 1. 보안 설정 (제목: Monthly Expenses) ---
+# --- 1. 보안 설정 ---
 def check_password():
     if "password_correct" not in st.session_state:
         st.set_page_config(page_title="Monthly Expenses", layout="centered")
@@ -21,16 +21,20 @@ def to_excel(df, writer_name, dept_name, exp_date, app_date, total_amt):
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         summary_df = pd.DataFrame({
             '항목': ['작성자', '소속', '지출일자', '결재일자', '총 합계'],
-            '내용': [writer_name, dept_name, exp_date.strftime("%Y-%m"), app_date.strftime("%Y-%m-%d"), total_amt]
+            # 여기 total_amt도 int()로 감싸서 .0 제거
+            '내용': [writer_name, dept_name, exp_date.strftime("%Y-%m"), app_date.strftime("%Y-%m-%d"), int(total_amt)]
         })
         summary_df.to_excel(writer, sheet_name='Monthly_Expenses', index=False, startrow=0)
-        df[['지출내역', '거래처', '금액', '비고']].to_excel(writer, sheet_name='Monthly_Expenses', index=False, startrow=7)
+        # 상세 내역 저장 시 금액 컬럼을 정수로 강제 변환
+        df_to_save = df[['지출내역', '거래처', '금액', '비고']].copy()
+        df_to_save['금액'] = df_to_save['금액'].astype(int)
+        df_to_save.to_excel(writer, sheet_name='Monthly_Expenses', index=False, startrow=7)
     return output.getvalue()
 
 if check_password():
     st.set_page_config(page_title="Monthly Expenses", layout="wide")
 
-    # --- 2. 환경 설정 로드 (Secrets) ---
+    # --- 2. 환경 설정 로드 ---
     manager_sig_base64 = st.secrets.get("MANAGER_SIG", "")
     ceo_sig_base64 = st.secrets.get("CEO_SIG", "")
     
@@ -63,8 +67,7 @@ if check_password():
         <style>
         .stTextInput label, .stDateInput label, .stTextArea label { font-size: 1.2rem !important; font-weight: bold !important; }
         input, textarea { font-size: 1.1rem !important; }
-        .stDownloadButton button { width: 100%; background-color: #1D6F42; color: white; font-weight: bold; height: 3.5rem; border: none; }
-        .stDownloadButton button:hover { background-color: #145230; color: white; }
+        .stDownloadButton button { width: 100%; background-color: #1D6F42 !important; color: white !important; font-weight: bold; height: 3.5rem; border: none; }
         </style>
         """, unsafe_allow_html=True)
 
@@ -72,13 +75,13 @@ if check_password():
     default_app = today.replace(day=10)
     default_exp = today - relativedelta(months=1)
 
-    # --- 3. 화면 레이아웃 (5:5 분할) ---
+    # --- 3. 화면 레이아웃 ---
     col_left, col_right = st.columns([1, 1], gap="large")
 
     with col_left:
         st.title("⚙️ Input Center")
         
-        raw_text = st.text_area("Master List (Edit/Add here)", value=st.session_state.bulk_input, height=200)
+        raw_text = st.text_area("Master List (수정 시 실시간 반영)", value=st.session_state.bulk_input, height=200)
         st.session_state.bulk_input = raw_text
         master_rows = [l.split(',', 1) if ',' in l else [l, ""] for l in raw_text.split('\n') if l.strip()]
         
@@ -90,12 +93,18 @@ if check_password():
         exp_date = d1.date_input("Expenditure Date", default_exp)
         app_date = d2.date_input("Approval Date", default_app)
 
+        # 데이터프레임 생성 시 금액을 정수형(int)으로 지정
         df_items = pd.DataFrame(master_rows, columns=["지출내역", "거래처"])
-        df_items.insert(0, "선택", False); df_items["금액"] = 0; df_items["비고"] = ""
+        df_items.insert(0, "선택", False)
+        df_items["금액"] = 0
+        # 강제로 정수형으로 변환하여 .0 방지
+        df_items["금액"] = df_items["금액"].astype(int)
+        df_items["비고"] = ""
         
         edited = st.data_editor(df_items, hide_index=True, use_container_width=True, height=350)
         selected = edited[edited["선택"] == True]
-        total_amt = selected["금액"].sum()
+        # 합계도 정수로 계산
+        total_amt = int(selected["금액"].sum())
 
         st.divider()
         if not selected.empty:
@@ -106,13 +115,18 @@ if check_password():
                 file_name=f"Expenses_{app_date.strftime('%Y%m%d')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+        else:
+            st.info("💡 위 목록에서 항목을 '선택'하면 엑셀 다운로드 버튼이 생깁니다.")
 
     with col_right:
         st.title("📄 Preview")
         m_tag = f'<img src="{manager_sig_base64}" style="width:55px;">' if manager_sig_base64 else ""
         c_tag = f'<img src="{ceo_sig_base64}" style="width:55px;">' if ceo_sig_base64 else ""
         
-        # HTML 디자인 수정: 얇은 선, 넓은 간격
+        # --- HTML 디자인 수정 ---
+        # 1. 모든 금액 표시에서 '₩' 제거
+        # 2. 모든 금액 변수에 int() 적용하여 .0 제거
+        # 3. 결제금액 박스 폰트 키우고 합계금액 굵게 강조
         html_code = f"""
         <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
         <script>
@@ -127,9 +141,9 @@ if check_password():
         }}
         </script>
         <button onclick="saveImage()" style="width:100%; padding:15px; background:#28a745; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; font-size:18px; margin-bottom:15px;">
-            📸 Save as Image
+            📸 Save as Image 
         </button>
-        <div id="capture-area" style="background:#fff; padding:40px; border:1px solid #000; font-family:'Malgun Gothic'; color:#000; width:650px; margin:0 auto;">
+        <div id="capture-area" style="background:#fff; padding:40px; border:1px solid #eee; font-family:'Malgun Gothic'; color:#000; width:650px; margin:0 auto;">
             <div style="font-size:32px; font-weight:normal; margin-bottom:25px; text-align:center;">지 출 결 의 서</div>
             
             <table style="width:100%; border-collapse:collapse; margin-bottom:20px;">
@@ -137,38 +151,38 @@ if check_password():
                     <td style="width:60%;"></td>
                     <td style="width:40%;">
                         <table style="width:100%; border-collapse:collapse; font-size:12px; text-align:center;">
-                            <tr style="height:30px;"><td rowspan="2" style="border:1px solid #000; width:30px; background:#f9f9f9; padding:5px;">결<br>재</td><td style="border:1px solid #000; padding:5px; background:#f9f9f9;">담 당</td><td style="border:1px solid #000; padding:5px; background:#f9f9f9;">대 표 이 사</td></tr>
-                            <tr style="height:60px;"><td style="border:1px solid #000;">{m_tag}</td><td style="border:1px solid #000;">{c_tag}</td></tr>
+                            <tr style="height:30px;"><td rowspan="2" style="border:1px solid #ddd; width:30px; background:#f9f9f9;">결<br>재</td><td style="border:1px solid #ddd; background:#f9f9f9;">담 당</td><td style="border:1px solid #ddd; background:#f9f9f9;">대 표 이 사</td></tr>
+                            <tr style="height:60px;"><td style="border:1px solid #ddd;">{m_tag}</td><td style="border:1px solid #ddd;">{c_tag}</td></tr>
                         </table>
                     </td>
                 </tr>
             </table>
 
-            <table style="width:100%; border-collapse:collapse; border:1px solid #000; font-size:14px; margin-bottom:20px;">
-                <tr style="height:45px;">
-                    <td style="border:1px solid #000; background:#f9f9f9; width:18%; text-align:center; padding:5px;">지출일자</td><td style="border:1px solid #000; width:32%; text-align:center; padding:5px;">{exp_date.strftime("%Y년 %m월")}</td>
-                    <td style="border:1px solid #000; background:#f9f9f9; width:18%; text-align:center; padding:5px;">작성자</td><td style="border:1px solid #000; width:32%; text-align:center; padding:5px;">{writer_name}</td>
+            <table style="width:100%; border-collapse:collapse; border:1px solid #ddd; font-size:14px; margin-bottom:20px;">
+                <tr style="height:50px;">
+                    <td style="border:1px solid #ddd; background:#f9f9f9; width:18%; text-align:center;">지출일자</td><td style="border:1px solid #ddd; width:32%; text-align:center;">{exp_date.strftime("%Y년 %m월")}</td>
+                    <td style="border:1px solid #ddd; background:#f9f9f9; width:18%; text-align:center;">작성자</td><td style="border:1px solid #ddd; width:32%; text-align:center;">{writer_name}</td>
                 </tr>
-                <tr style="height:45px;">
-                    <td style="border:1px solid #000; background:#f9f9f9; text-align:center; padding:5px;">결재일자</td><td style="border:1px solid #000; text-align:center; padding:5px;">{app_date.strftime("%Y년 %m월 %d일")}</td>
-                    <td style="border:1px solid #000; background:#f9f9f9; text-align:center; padding:5px;">소속</td><td style="border:1px solid #000; text-align:center; padding:5px;">{dept_name}</td>
+                <tr style="height:50px;">
+                    <td style="border:1px solid #ddd; background:#f9f9f9; text-align:center;">결재일자</td><td style="border:1px solid #ddd; text-align:center;">{app_date.strftime("%Y년 %m월 %d일")}</td>
+                    <td style="border:1px solid #ddd; background:#f9f9f9; text-align:center;">소속</td><td style="border:1px solid #ddd; text-align:center;">{dept_name}</td>
                 </tr>
             </table>
 
-            <div style="border:1px solid #000; padding:15px; font-size:15px; margin-bottom:20px; background:#f9f9f9;">
-                결제금액: &nbsp;&nbsp; 일금 &nbsp;&nbsp; ₩ <b>{total_amt:,}</b> &nbsp;&nbsp; 원정 (부가세 별도)
+            <div style="border:1px solid #ddd; padding:20px; font-size:17px; margin-bottom:20px; background:#f9f9f9;">
+                <span style="font-weight:bold;">결제금액: &nbsp;&nbsp; 일금 &nbsp;&nbsp; <span style="font-size:22px; color:#000;">{int(total_amt):,}</span> &nbsp;&nbsp; 원정</span>
             </div>
 
-            <table style="width:100%; border-collapse:collapse; border:1px solid #000; font-size:13px;">
-                <tr style="background:#f9f9f9; text-align:center; height:40px;">
-                    <td style="border:1px solid #000; width:25%; padding:5px;">지 출 내 역</td><td style="border:1px solid #000; width:25%; padding:5px;">거 래 처</td><td style="border:1px solid #000; width:20%; padding:5px;">금 액</td><td style="border:1px solid #000; padding:5px;">비 고</td>
-                </tr>
-                {"".join([f"<tr style='height:38px; text-align:center;'><td style='border:1px solid #000; padding:5px;'>{r['지출내역']}</td><td style='border:1px solid #000; padding:5px;'>{r['거래처']}</td><td style='border:1px solid #000; padding:5px;'>₩{r['금액']:,}</td><td style='border:1px solid #000; padding:5px;'>{r['비고']}</td></tr>" for _, r in selected.iterrows()])}
+            <table style="width:100%; border-collapse:collapse; border:1px solid #ddd; font-size:13px;">
                 <tr style="background:#f9f9f9; text-align:center; height:45px;">
-                    <td colspan="2" style="border:1px solid #000; padding:5px;">합 계</td><td colspan="2" style="border:1px solid #000; text-align:left; padding-left:20px;">₩ {total_amt:,}</td>
+                    <td style="border:1px solid #ddd; width:25%;">지 출 내 역</td><td style="border:1px solid #ddd; width:25%;">거 래 처</td><td style="border:1px solid #ddd; width:20%;">금 액</td><td style="border:1px solid #ddd;">비 고</td>
+                </tr>
+                {"".join([f"<tr style='height:45px; text-align:center;'><td style='border:1px solid #ddd;'>{r['지출내역']}</td><td style='border:1px solid #ddd;'>{r['거래처']}</td><td style='border:1px solid #ddd;'>{int(r['금액']):,}</td><td style='border:1px solid #ddd;'>{r['비고']}</td></tr>" for _, r in selected.iterrows()])}
+                <tr style="background:#f9f9f9; text-align:center; height:50px; font-weight:bold; font-size:15px;">
+                    <td colspan="2" style="border:1px solid #ddd;">합 계</td><td colspan="2" style="border:1px solid #ddd; text-align:left; padding-left:20px;">{int(total_amt):,}</td>
                 </tr>
             </table>
-            <div style="text-align:center; font-size:20px; margin-top:50px;">(주) 원준프로듀스</div>
+            <div style="text-align:center; font-size:18px; margin-top:60px;">(주) 원준프로듀스</div>
         </div>
         """
         components.html(html_code, height=1200, scrolling=True)
