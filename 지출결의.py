@@ -101,7 +101,7 @@ if check_password():
         if not selected.empty:
             excel_data = to_excel(selected, writer_name, dept_name, exp_date, app_date, total_amt)
             st.download_button(
-                label="📊 Download as Excel (띡!)",
+                label="📊 Download as Excel",
                 data=excel_data,
                 file_name=f"Expenses_{app_date.strftime('%Y%m%d')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -127,7 +127,7 @@ if check_password():
         }}
         </script>
         <button onclick="saveImage()" style="width:100%; padding:15px; background:#28a745; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; font-size:18px; margin-bottom:15px;">
-            📸 Save as Image (띡!)
+            📸 Save as Image
         </button>
         <div id="capture-area" style="background:#fff; padding:40px; border:1px solid #000; font-family:'Malgun Gothic'; color:#000; width:650px; margin:0 auto;">
             <div style="font-size:32px; font-weight:normal; margin-bottom:25px; text-align:center;">지 출 결 의 서</div>
